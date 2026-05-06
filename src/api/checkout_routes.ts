@@ -8,6 +8,7 @@ import {
   rememberIdempotentResponse,
   reserveCartHold,
 } from "../services/reservation_ledger";
+import { ingestCheckoutCommerceFacts } from "../services/merchandising_checkout_ingest";
 
 const cartLineSchema = z.object({
   sku: z.string().min(1),
@@ -30,12 +31,31 @@ const preflightBodySchema = z
     }
   });
 
+const commerceLineSchema = z.object({
+  lineId: z.string().min(1),
+  sku: z.string().min(1),
+  qty: z.number().int().positive(),
+  grossMinor: z.number().int().nonnegative(),
+  taxBucket: z.enum(["standard", "reduced", "zero"]).default("standard"),
+});
+
+const commerceSchema = z.object({
+  currency: z.string().length(3),
+  channel: z.string().min(1).default("web"),
+  discountMinor: z.number().int().nonnegative().optional(),
+  shippingMinor: z.number().int().nonnegative().optional(),
+  taxMinor: z.number().int().nonnegative().optional(),
+  taxInclusiveMinor: z.number().int().nonnegative().optional(),
+  lines: z.array(commerceLineSchema).min(1),
+});
+
 const submitBodySchema = z.object({
   cart_id: z.string().min(1),
   payment_method: z.string().min(1),
   gift_message: z.string().optional(),
   order_id: z.string().min(1).optional(),
   idempotency_key: z.string().min(1).optional(),
+  commerce: commerceSchema.optional(),
 });
 
 const couponBodySchema = z.object({
@@ -101,6 +121,7 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
 
   const correlationId = newCorrelationId();
   const orderRef = body.order_id ?? `ord_${randomUUID()}`;
+  const occurredAt = new Date().toISOString();
 
   const commit = commitCartHold({
     cartId: body.cart_id,
@@ -109,13 +130,33 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
   });
 
   if (!commit.ok) {
-    const status = commit.code === "NO_ACTIVE_HOLD" ? 409 : 409;
-    sendJson(res, status, {
+    sendJson(res, 409, {
       error: commit.code === "NO_ACTIVE_HOLD" ? "No active reservation for cart" : "Insufficient stock at commit",
       code: commit.code,
       ...(commit.skuId ? { skuId: commit.skuId } : {}),
     });
     return;
+  }
+
+  if (body.commerce) {
+    ingestCheckoutCommerceFacts({
+      orderRef: commit.orderRef,
+      correlationId: commit.correlationId,
+      occurredAt,
+      currency: body.commerce.currency,
+      channel: body.commerce.channel,
+      discountMinor: body.commerce.discountMinor,
+      shippingMinor: body.commerce.shippingMinor,
+      taxMinor: body.commerce.taxMinor,
+      taxInclusiveMinor: body.commerce.taxInclusiveMinor,
+      lines: body.commerce.lines.map((l) => ({
+        lineId: l.lineId,
+        sku: l.sku,
+        qty: l.qty,
+        grossMinor: l.grossMinor,
+        taxBucket: l.taxBucket,
+      })),
+    });
   }
 
   const payload = {

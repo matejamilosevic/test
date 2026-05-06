@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/services/reservation_ledger.test.ts src/api/checkout_routes.test.ts"
+    "test": "tsx --test src/services/reservation_ledger.test.ts src/api/checkout_routes.test.ts src/lib/merchandising_golden.test.ts src/api/reporting_routes.test.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
