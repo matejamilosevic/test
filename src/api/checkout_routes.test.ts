@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handle_checkout_preflight, handle_checkout_submit } from "./checkout_routes";
 import { resetReservationLedgerForTests, seedOnHandSku } from "../services/reservation_ledger";
+import { resetMerchandisingFactsForTests, computeMerchandisingRollup } from "../services/merchandising_facts_store";
 
 function mockInboundJson(body: unknown): IncomingMessage {
   const buf = Buffer.from(JSON.stringify(body), "utf8");
@@ -37,6 +38,7 @@ function captureResponse(): { res: ServerResponse; finished: Promise<{ status: n
 
 afterEach(() => {
   resetReservationLedgerForTests();
+  resetMerchandisingFactsForTests();
 });
 
 test("preflight with lines reserves stock; submit commits", async () => {
@@ -80,6 +82,44 @@ test("submit without active hold returns NO_ACTIVE_HOLD", async () => {
   assert.strictEqual(out.status, 409);
   const json = JSON.parse(out.body) as { code: string };
   assert.strictEqual(json.code, "NO_ACTIVE_HOLD");
+});
+
+test("submit with commerce ingests merchandising facts after successful commit", async () => {
+  seedOnHandSku("SKU-COM", 5);
+  const pre = captureResponse();
+  await handle_checkout_preflight(
+    mockInboundJson({
+      subtotal: 25,
+      cart_id: "cart-com",
+      lines: [{ sku: "SKU-COM", qty: 1 }],
+    }),
+    pre.res,
+  );
+  await pre.finished;
+
+  const { res, finished } = captureResponse();
+  await handle_checkout_submit(
+    mockInboundJson({
+      cart_id: "cart-com",
+      payment_method: "card",
+      order_id: "ord-com-1",
+      commerce: {
+        currency: "USD",
+        channel: "web",
+        lines: [{ lineId: "L1", sku: "SKU-COM", qty: 1, grossMinor: 2500 }],
+        discountMinor: 500,
+        shippingMinor: 200,
+      },
+    }),
+    res,
+  );
+  const out = await finished;
+  assert.strictEqual(out.status, 200);
+  const rollup = computeMerchandisingRollup({ asOfIso: new Date("2098-01-01").toISOString(), currency: "USD" });
+  assert.strictEqual(rollup.gmvMinor, 2500);
+  assert.strictEqual(rollup.discountMinor, 500);
+  assert.strictEqual(rollup.shippingMinor, 200);
+  assert.strictEqual(rollup.netRevenueMinor, 2200);
 });
 
 test("idempotency key returns cached submit body", async () => {

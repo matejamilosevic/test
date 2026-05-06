@@ -1,0 +1,11 @@
+{
+  "export_version": 2,
+  "as_of": "2026-05-06T12:00:00.000Z",
+  "currency": "USD",
+  "gmv_minor": 10000,
+  "discount_minor": 1000,
+  "shipping_minor": 500,
+  "tax_minor": 800,
+  "refund_minor": 0,
+  "net_revenue_minor": 9500
+}
