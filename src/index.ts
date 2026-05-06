@@ -10,6 +10,15 @@ export {
   allocate_backorder,
   ingest_vendor_payload,
 } from "./services/inventory_sync_service";
+export {
+  listReservationLedgerEvents,
+  getAvailableToPromise,
+  seedOnHandSku,
+  resetReservationLedgerForTests,
+  reserveCartHold,
+  commitCartHold,
+  releaseCartHold,
+} from "./services/reservation_ledger";
 export { handle_checkout_submit, handle_checkout_preflight, handle_coupon_apply } from "./api/checkout_routes";
 export { handle_account_lookup, handle_account_patch } from "./api/account_routes";
 export { user_profile_banner, loyalty_strip } from "./components/ProfileBanner";
