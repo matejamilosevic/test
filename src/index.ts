@@ -20,6 +20,16 @@ export {
   releaseCartHold,
 } from "./services/reservation_ledger";
 export { handle_checkout_submit, handle_checkout_preflight, handle_coupon_apply } from "./api/checkout_routes";
+export {
+  handle_checkout_risk_eval,
+  handle_risk_review_cases_list,
+  handle_risk_review_case_get,
+  handle_risk_review_case_override,
+} from "./api/risk_routes";
+export { evaluateCheckoutRisk } from "./services/risk_engine";
+export { resetRiskStoreForTests, getRiskMetrics } from "./services/risk_store";
+export { setRiskConfigForTests, resetRiskConfigForTests, isRiskGateEnabled } from "./lib/risk_config";
+export { RISK_ERROR_CODES, FEATURE_GATES } from "./lib/risk_constants";
 export { handle_account_lookup, handle_account_patch } from "./api/account_routes";
 export { user_profile_banner, loyalty_strip } from "./components/ProfileBanner";
 export { order_summary_panel } from "./components/OrderSummaryPanel";
