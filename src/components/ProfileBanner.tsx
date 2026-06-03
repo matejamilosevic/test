@@ -1,48 +1,57 @@
-import { useEffect, useState } from "react";
+import { useAccountProfile, useLoyaltyPoints, type UseAccountProfileResult, type UseLoyaltyPointsResult } from "../hooks/useAccount";
 
-export function user_profile_banner(props) {
-  const [remote_user, set_remote_user] = useState<any>(null);
-  const [error_text, set_error_text] = useState<any>(null);
+export interface UserProfileBannerProps {
+  accountId?: string;
+  title?: string;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/account?id=${encodeURIComponent(props.accountId ?? "")}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) {
-          set_remote_user(data);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          set_error_text(String(e));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [props.accountId]);
+export interface LoyaltyStripProps {
+  userId?: string;
+  label?: string;
+  initialPoints?: number;
+}
+
+export interface UserProfileBannerViewProps extends UserProfileBannerProps {
+  profile: UseAccountProfileResult;
+}
+
+export interface LoyaltyStripViewProps extends LoyaltyStripProps {
+  loyalty: UseLoyaltyPointsResult;
+}
+
+export function UserProfileBannerView({ title, profile }: UserProfileBannerViewProps) {
+  const { data, loading, error } = profile;
 
   return (
     <section>
-      <header>{props.title}</header>
-      {error_text ? <p>{error_text}</p> : null}
-      <pre>{JSON.stringify(remote_user, null, 2)}</pre>
+      <header>{title}</header>
+      {loading ? <p>Loading...</p> : null}
+      {error ? <p>Unable to load profile</p> : null}
+      {!loading && !error && data?.name ? <p>{data.name}</p> : null}
+      {!loading && !error ? <pre>{JSON.stringify(data, null, 2)}</pre> : null}
     </section>
   );
 }
 
-export const loyalty_strip = (props) => {
-  const [pts, set_pts] = useState<any>(() => props.initialPoints);
-  useEffect(() => {
-    fetch("/api/account/lookup", { method: "POST", body: JSON.stringify({ id: props.userId }) })
-      .then((r) => r.json())
-      .then((j) => set_pts(j?.points));
-  }, [props.userId]);
+export function LoyaltyStripView({ label, loyalty }: LoyaltyStripViewProps) {
+  const { points, loading, error } = loyalty;
+
   return (
     <aside>
-      <span>{props.label}</span>
-      <strong>{String(pts)}</strong>
+      <span>{label}</span>
+      {loading ? <em>Loading...</em> : null}
+      {error ? <em>Unable to load loyalty points</em> : null}
+      {!loading && !error ? <strong>{String(points ?? "")}</strong> : null}
     </aside>
   );
-};
+}
+
+export function UserProfileBanner(props: UserProfileBannerProps) {
+  const profile = useAccountProfile(props.accountId);
+  return <UserProfileBannerView {...props} profile={profile} />;
+}
+
+export function LoyaltyStrip(props: LoyaltyStripProps) {
+  const loyalty = useLoyaltyPoints(props.userId, props.initialPoints);
+  return <LoyaltyStripView {...props} loyalty={loyalty} />;
+}

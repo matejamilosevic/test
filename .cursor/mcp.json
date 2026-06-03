@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "codemerlin": {
+      "url": "https://staging-api.codemerlin.ai/api/v1/mcp"
+    }
+  }
+}
