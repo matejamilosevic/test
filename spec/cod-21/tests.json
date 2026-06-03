@@ -1,0 +1,190 @@
+[
+  {
+    "order": 1,
+    "steps": [
+      "Given a RiskEvaluationInput for \"cart-high-risk-02\" with high-velocity signals",
+      "When I call evaluateCheckoutRisk",
+      "Then the response outcome should be \"block\"",
+      "And the score should exceed the block threshold"
+    ],
+    "title": "Deterministic scoring for high-risk signals",
+    "ac_anchors": ["ac.1"],
+    "fr_anchors": ["FR-001", "FR-002"],
+    "test_data_ref": "cart-high-risk-02",
+    "validation_type": "integration",
+    "scenario_category": "happy"
+  },
+  {
+    "order": 2,
+    "steps": [
+      "Given a RiskEvaluationInput containing a credit card PAN",
+      "When I call evaluateCheckoutRisk",
+      "Then the record in \"risk_evaluation_events\" should have \"scrubbed_input\" without the PAN"
+    ],
+    "title": "PII Scrubbing before persistence",
+    "ac_anchors": ["ac.4"],
+    "fr_anchors": ["FR-006"],
+    "test_data_ref": "alice@acme.com",
+    "validation_type": "unit",
+    "scenario_category": "edge"
+  },
+  {
+    "order": 3,
+    "steps": [
+      "Given a cart \"cart-happy-01\" with no prior risk evaluation",
+      "When I POST to \"/checkout/submit\"",
+      "Then the response status should be 400 RISK_EVAL_REQUIRED"
+    ],
+    "title": "Submit blocked without prior evaluation",
+    "ac_anchors": ["ac.1"],
+    "fr_anchors": ["FR-003"],
+    "test_data_ref": "cart-happy-01",
+    "validation_type": "integration",
+    "scenario_category": "error"
+  },
+  {
+    "order": 4,
+    "steps": [
+      "Given a risk evaluation for \"cart-high-risk-02\" with outcome \"block\"",
+      "When I POST to \"/checkout/submit\"",
+      "Then the response status should be 403 RISK_DECLINED",
+      "And no ledger commit should be recorded"
+    ],
+    "title": "Blocked outcome prevents ledger commit",
+    "ac_anchors": ["ac.3"],
+    "fr_anchors": ["FR-003", "SC-004"],
+    "test_data_ref": "cart-high-risk-02",
+    "validation_type": "integration",
+    "scenario_category": "happy"
+  },
+  {
+    "order": 5,
+    "steps": [
+      "Given a risk evaluation for \"cart-review-03\" with outcome \"review\"",
+      "When I POST to \"/checkout/submit\"",
+      "Then the response status should be 202 Accepted",
+      "And a new case should exist in \"risk_review_cases\" with status \"open\""
+    ],
+    "title": "Review outcome creates case and returns 202",
+    "ac_anchors": ["ac.3"],
+    "fr_anchors": ["FR-007"],
+    "test_data_ref": "cart-review-03",
+    "validation_type": "integration",
+    "scenario_category": "alt"
+  },
+  {
+    "order": 6,
+    "steps": [
+      "Given the feature flag \"checkout.risk_shadow_mode\" is ON",
+      "And a risk evaluation for \"cart-high-risk-02\" with outcome \"block\"",
+      "When I POST to \"/checkout/submit\"",
+      "Then the response status should be 200 OK"
+    ],
+    "title": "Shadow mode allows blocked orders",
+    "ac_anchors": ["ac.6"],
+    "fr_anchors": ["FR-005"],
+    "test_data_ref": "cart-high-risk-02",
+    "validation_type": "integration",
+    "scenario_category": "flag_off"
+  },
+  {
+    "order": 7,
+    "steps": [
+      "Given an \"open\" case in \"risk_review_cases\" for \"cart-review-03\"",
+      "When \"support-agent@acme.com\" applies a \"risk_override\"",
+      "Then the case status should be \"approved\"",
+      "And a subsequent POST to \"/checkout/submit\" should return 200 OK"
+    ],
+    "title": "Support override allows checkout",
+    "ac_anchors": ["ac.5"],
+    "fr_anchors": ["FR-007"],
+    "test_data_ref": "support-agent@acme.com",
+    "validation_type": "integration",
+    "scenario_category": "happy"
+  },
+  {
+    "order": 8,
+    "steps": [
+      "Given an \"open\" case exists for \"org-acme-01\"",
+      "When \"charlie@globex.com\" attempts to GET the case details",
+      "Then the response status should be 403 Forbidden"
+    ],
+    "title": "Multi-tenant isolation for review cases",
+    "ac_anchors": ["ac.5"],
+    "fr_anchors": ["FR-007"],
+    "test_data_ref": "charlie@globex.com",
+    "validation_type": "integration",
+    "scenario_category": "auth_403"
+  },
+  {
+    "order": 9,
+    "steps": [
+      "Given no authentication token",
+      "When I POST to \"/checkout/risk-eval\"",
+      "Then the response status should be 401 Unauthorized"
+    ],
+    "title": "Unauthenticated risk evaluation",
+    "ac_anchors": ["ac.1"],
+    "fr_anchors": ["FR-004"],
+    "test_data_ref": "alice@acme.com",
+    "validation_type": "integration",
+    "scenario_category": "auth_401"
+  },
+  {
+    "order": 10,
+    "steps": [
+      "Given a risk evaluation for \"cart-happy-01\" with \"quote-v1\"",
+      "And the cart quote is updated to \"quote-v2\"",
+      "When I POST to \"/checkout/submit\"",
+      "Then the response status should be 400 RISK_EVAL_REQUIRED"
+    ],
+    "title": "Quote version mismatch forces re-evaluation",
+    "ac_anchors": ["ac.2"],
+    "fr_anchors": ["FR-003"],
+    "test_data_ref": "cart-happy-01",
+    "validation_type": "integration",
+    "scenario_category": "edge"
+  },
+  {
+    "order": 11,
+    "steps": [
+      "Given the feature flag \"checkout.risk_gate_enabled\" is OFF",
+      "When I POST to \"/checkout/submit\" for a cart with no evaluation",
+      "Then the response status should be 200 OK"
+    ],
+    "title": "Feature gate kill-switch",
+    "ac_anchors": ["ac.6"],
+    "fr_anchors": ["SC-005"],
+    "test_data_ref": "org-flag-off-03",
+    "validation_type": "regression",
+    "scenario_category": "flag_off"
+  },
+  {
+    "order": 12,
+    "steps": [
+      "When I call evaluateCheckoutRisk 100 times",
+      "Then the p95 latency should be less than 200ms"
+    ],
+    "title": "Latency target",
+    "ac_anchors": ["ac.6"],
+    "fr_anchors": ["SC-002"],
+    "test_data_ref": "cart-happy-01",
+    "validation_type": "integration",
+    "scenario_category": "perf"
+  },
+  {
+    "order": 13,
+    "steps": [
+      "Perform risk evaluation for a suspicious cart resulting in \"review\" outcome",
+      "Submit checkout and verify 202 Accepted status",
+      "Approve the review case via support override API",
+      "Submit checkout again and verify 200 OK"
+    ],
+    "title": "Full risk-gated checkout journey",
+    "ac_anchors": ["ac.1", "ac.3", "ac.5"],
+    "fr_anchors": ["FR-003", "FR-004", "FR-007"],
+    "test_data_ref": "cart-review-03",
+    "validation_type": "e2e",
+    "scenario_category": "e2e_chain"
+  }
+]
