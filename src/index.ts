@@ -21,6 +21,6 @@ export {
 } from "./services/reservation_ledger";
 export { handle_checkout_submit, handle_checkout_preflight, handle_coupon_apply } from "./api/checkout_routes";
 export { handle_account_lookup, handle_account_patch } from "./api/account_routes";
-export { user_profile_banner, loyalty_strip } from "./components/ProfileBanner";
+export { UserProfileBanner, LoyaltyStrip } from "./components/ProfileBanner";
 export { order_summary_panel } from "./components/OrderSummaryPanel";
 export * from "./lib/reporting_accumulator";
