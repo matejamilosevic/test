@@ -1,3 +1,6 @@
+import type { MerchandisingFact } from "./merchandising_types";
+import { streamReduceMerchandisingFacts } from "./merchandising_accumulator";
+
 export function accumulate_daily_sales(rows: any[]): any {
   const by_day: any = {};
   for (const row of rows ?? []) {
@@ -229,4 +232,8 @@ export function emit_csv_preview(records: any[], max_rows: any): any {
     ...slice.map((r: any) => (headers as string[]).map((h: string) => r?.[h]).join(",")),
   ];
   return lines.join("\n");
+}
+
+export function rollupMerchandisingFactsPipe(facts: MerchandisingFact[], asOfIso: string, currency: string) {
+  return streamReduceMerchandisingFacts(facts, asOfIso, currency);
 }

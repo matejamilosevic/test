@@ -20,6 +20,27 @@ export {
   releaseCartHold,
 } from "./services/reservation_ledger";
 export { handle_checkout_submit, handle_checkout_preflight, handle_coupon_apply } from "./api/checkout_routes";
+export { handle_merchandising_rollup, handle_merchandising_export } from "./api/reporting_routes";
+export {
+  resetMerchandisingFactsForTests,
+  ingestMerchandisingFact,
+  merchandisingFactDedupeKey,
+  listMerchandisingFactsFiltered,
+  computeMerchandisingRollup,
+  computeMerchandisingRollupStreamed,
+  allMerchandisingFacts,
+} from "./services/merchandising_facts_store";
+export { ingestCheckoutCommerceFacts, ingestRefundFacts } from "./services/merchandising_checkout_ingest";
+export { parseMerchandisingAsOf } from "./lib/merchandising_time";
+export { reconcileMerchandisingToLegacy } from "./lib/merchandising_reconcile";
+export { MERCHANDISING_EXPORT_VERSION, MERCHANDISING_EXPORT_COLUMNS } from "./lib/merchandising_types";
+export type {
+  MerchandisingFact,
+  MerchandisingRollup,
+  MerchandisingFactCategory,
+  MerchandisingFactEventType,
+  MerchandisingTaxBucket,
+} from "./lib/merchandising_types";
 export {
   handle_checkout_risk_eval,
   handle_risk_review_cases_list,
