@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { JSDOM } from "jsdom";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -13,17 +12,7 @@ import {
   resetProfileConfigForTests,
   setProfileConfigForTests,
 } from "../../lib/profile_config";
-
-function setupDom(): HTMLElement {
-  const dom = new JSDOM("<!DOCTYPE html><html><body><div id=\"root\"></div></body></html>");
-  const { window } = dom;
-  globalThis.window = window as unknown as Window & typeof globalThis;
-  globalThis.document = window.document;
-  globalThis.navigator = window.navigator;
-  globalThis.HTMLElement = window.HTMLElement;
-  globalThis.Node = window.Node;
-  return window.document.getElementById("root")!;
-}
+import { setupDom, teardownDom } from "../../test/dom";
 
 test("ProfileBanner exports use camelCase names", () => {
   assert.equal(typeof UserProfileBanner, "function");
@@ -172,6 +161,8 @@ test("LoyaltyStripView shows Try again button when retry UX is enabled", () => {
     );
 
     assert.match(html, /Try again/);
+    assert.doesNotMatch(html, /<em>[\s\S]*Try again/);
+    assert.match(html, /<p>[\s\S]*Try again[\s\S]*<\/p>/);
   } finally {
     resetProfileConfigForTests();
   }
@@ -213,6 +204,7 @@ test("UserProfileBannerView Try again click calls refetch once", async () => {
     assert.equal(refetchCalls, 1);
   } finally {
     root.unmount();
+    teardownDom();
     resetProfileConfigForTests();
   }
 });
@@ -253,6 +245,7 @@ test("LoyaltyStripView Try again click calls refetch once", async () => {
     assert.equal(refetchCalls, 1);
   } finally {
     root.unmount();
+    teardownDom();
     resetProfileConfigForTests();
   }
 });

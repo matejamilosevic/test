@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { JSDOM } from "jsdom";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { useEffect } from "react";
-import { useAccountProfile, type UseAccountProfileResult } from "./useAccount";
+import {
+  useAccountProfile,
+  useLoyaltyPoints,
+  type UseAccountProfileResult,
+  type UseLoyaltyPointsResult,
+} from "./useAccount";
+import { setupDom, teardownDom } from "../test/dom";
 
 type FetchHandler = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -16,19 +21,12 @@ function mockFetch(handler: FetchHandler): () => void {
   };
 }
 
-function setupDom(): HTMLElement {
-  const dom = new JSDOM("<!DOCTYPE html><html><body><div id=\"root\"></div></body></html>");
-  const { window } = dom;
-  globalThis.window = window as unknown as Window & typeof globalThis;
-  globalThis.document = window.document;
-  globalThis.navigator = window.navigator;
-  globalThis.HTMLElement = window.HTMLElement;
-  globalThis.Node = window.Node;
-  return window.document.getElementById("root")!;
-}
-
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function latestSnapshot<T>(snapshots: T[]): T | undefined {
+  return snapshots[snapshots.length - 1];
 }
 
 test("useAccountProfile fetch helper rejects non-200 account responses", async () => {
@@ -149,19 +147,77 @@ test("useAccountProfile refetch clears error and re-triggers fetch", async () =>
     assert.equal(latestSnapshot(snapshots)?.data?.name, "Ada Lovelace");
   } finally {
     root.unmount();
+    teardownDom();
     restore();
   }
 });
 
-function latestSnapshot(snapshots: UseAccountProfileResult[]): UseAccountProfileResult | undefined {
-  return snapshots[snapshots.length - 1];
-}
+test("useAccountProfile refetch keeps error state when retry also fails", async () => {
+  let fetchCount = 0;
+  const restore = mockFetch(async () => {
+    fetchCount += 1;
+    return {
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as Response;
+  });
+
+  const snapshots: UseAccountProfileResult[] = [];
+
+  function Harness() {
+    const result = useAccountProfile("user-01");
+    useEffect(() => {
+      snapshots.push({
+        data: result.data,
+        loading: result.loading,
+        error: result.error,
+        refetch: result.refetch,
+      });
+    }, [result.data, result.error, result.loading, result.refetch]);
+    return null;
+  }
+
+  const container = setupDom();
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const failedSnapshot = latestSnapshot(snapshots);
+    assert.equal(failedSnapshot?.error, "Unable to load profile");
+
+    await act(async () => {
+      failedSnapshot?.refetch?.();
+    });
+    await flushPromises();
+    await flushPromises();
+
+    await act(async () => {
+      latestSnapshot(snapshots)?.refetch?.();
+    });
+    await flushPromises();
+    await flushPromises();
+
+    assert.ok(fetchCount >= 3);
+    assert.equal(latestSnapshot(snapshots)?.error, "Unable to load profile");
+    assert.equal(latestSnapshot(snapshots)?.loading, false);
+  } finally {
+    root.unmount();
+    teardownDom();
+    restore();
+  }
+});
 
 test("useAccountProfile ignores stale refetch when accountId changes", async () => {
   let resolveFirst: ((value: Response) => void) | null = null;
   let fetchCount = 0;
 
-  const restore = mockFetch((_input, init) => {
+  const restore = mockFetch(() => {
     fetchCount += 1;
     if (fetchCount === 1) {
       return new Promise<Response>((resolve) => {
@@ -213,6 +269,68 @@ test("useAccountProfile ignores stale refetch when accountId changes", async () 
     assert.equal(latest.current?.data?.name, "Grace Hopper");
   } finally {
     root.unmount();
+    teardownDom();
+    restore();
+  }
+});
+
+test("useLoyaltyPoints ignores stale refetch when userId changes", async () => {
+  let resolveFirst: ((value: Response) => void) | null = null;
+  let fetchCount = 0;
+
+  const restore = mockFetch(() => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return new Promise<Response>((resolve) => {
+        resolveFirst = resolve;
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "user-02", tier: "gold", points: 99 }),
+    } as Response);
+  });
+
+  const latest = { current: null as UseLoyaltyPointsResult | null };
+
+  function Harness({ userId }: { userId?: string }) {
+    const result = useLoyaltyPoints(userId);
+    useEffect(() => {
+      latest.current = result;
+    }, [result]);
+    return null;
+  }
+
+  const container = setupDom();
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(<Harness userId="user-01" />);
+    });
+
+    await act(async () => {
+      root.render(<Harness userId="user-02" />);
+    });
+    await flushPromises();
+    await flushPromises();
+
+    assert.equal(latest.current?.points, 99);
+
+    await act(async () => {
+      resolveFirst?.({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "user-01", tier: "standard", points: 1 }),
+      } as Response);
+    });
+    await flushPromises();
+
+    assert.equal(latest.current?.points, 99);
+  } finally {
+    root.unmount();
+    teardownDom();
     restore();
   }
 });

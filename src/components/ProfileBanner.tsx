@@ -56,7 +56,7 @@ export function LoyaltyStripView({ label, loyalty }: LoyaltyStripViewProps) {
       <span>{label}</span>
       {loading ? <em>Loading...</em> : null}
       {error ? (
-        <em>
+        <p>
           Unable to load loyalty points
           {retryEnabled && refetch ? (
             <>
@@ -66,7 +66,7 @@ export function LoyaltyStripView({ label, loyalty }: LoyaltyStripViewProps) {
               </button>
             </>
           ) : null}
-        </em>
+        </p>
       ) : null}
       {!loading && !error ? <strong>{String(points ?? "")}</strong> : null}
     </aside>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AccountLookupResponse, AccountProfile, AsyncDataState } from "../types/account";
+import { useRefetchTrigger } from "./useRefetchTrigger";
 
 export type UseAccountProfileResult = AsyncDataState<AccountProfile>;
 export type UseLoyaltyPointsResult = AsyncDataState<AccountLookupResponse> & {
@@ -10,16 +11,13 @@ export function useAccountProfile(accountId?: string): UseAccountProfileResult {
   const [data, setData] = useState<AccountProfile | null>(null);
   const [loading, setLoading] = useState(Boolean(accountId));
   const [error, setError] = useState<string | null>(null);
-  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
-  const refetch = useCallback(() => {
-    if (!accountId) {
-      return;
-    }
+  const onBeforeRefetch = useCallback(() => {
     setLoading(true);
     setError(null);
-    setRefetchTrigger((current) => current + 1);
-  }, [accountId]);
+  }, []);
+
+  const { refetchTrigger, refetch } = useRefetchTrigger(Boolean(accountId), onBeforeRefetch);
 
   useEffect(() => {
     if (!accountId) {
@@ -66,16 +64,13 @@ export function useLoyaltyPoints(userId?: string, initialPoints?: number): UseLo
   const [points, setPoints] = useState<number | null>(initialPoints ?? null);
   const [loading, setLoading] = useState(Boolean(userId));
   const [error, setError] = useState<string | null>(null);
-  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
-  const refetch = useCallback(() => {
-    if (!userId) {
-      return;
-    }
+  const onBeforeRefetch = useCallback(() => {
     setLoading(true);
     setError(null);
-    setRefetchTrigger((current) => current + 1);
-  }, [userId]);
+  }, []);
+
+  const { refetchTrigger, refetch } = useRefetchTrigger(Boolean(userId), onBeforeRefetch);
 
   useEffect(() => {
     if (!userId) {
