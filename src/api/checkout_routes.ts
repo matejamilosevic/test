@@ -9,6 +9,7 @@ import {
   reserveCartHold,
 } from "../services/reservation_ledger";
 import { ingestCheckoutCommerceFacts } from "../services/merchandising_checkout_ingest";
+import { resolveRiskGateForSubmit } from "./risk_routes";
 
 const cartLineSchema = z.object({
   sku: z.string().min(1),
@@ -56,6 +57,10 @@ const submitBodySchema = z.object({
   order_id: z.string().min(1).optional(),
   idempotency_key: z.string().min(1).optional(),
   commerce: commerceSchema.optional(),
+  quote_version: z.string().min(1).optional(),
+  organization_id: z.string().min(1).optional(),
+  override_token: z.string().min(1).optional(),
+  challenge_token: z.string().min(1).optional(),
 });
 
 const couponBodySchema = z.object({
@@ -119,6 +124,18 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
     }
   }
 
+  const riskGate = resolveRiskGateForSubmit({
+    cartId: body.cart_id,
+    quoteVersion: body.quote_version,
+    organizationId: body.organization_id,
+    overrideToken: body.override_token,
+    challengeToken: body.challenge_token,
+  });
+  if (!riskGate.ok) {
+    sendJson(res, riskGate.status, riskGate.body);
+    return;
+  }
+
   const correlationId = newCorrelationId();
   const orderRef = body.order_id ?? `ord_${randomUUID()}`;
   const occurredAt = new Date().toISOString();
@@ -167,6 +184,9 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
       payment_method: body.payment_method,
       gift_message: body.gift_message,
       correlation_id: commit.correlationId,
+      ...(riskGate.enforce && riskGate.evaluation
+        ? { evaluation_id: riskGate.evaluation.id, risk_outcome: riskGate.evaluation.outcome }
+        : {}),
     },
   };
   const responseJson = JSON.stringify(payload);
