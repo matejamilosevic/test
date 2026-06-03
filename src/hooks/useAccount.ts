@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AccountLookupResponse, AccountProfile, AsyncDataState } from "../types/account";
 
 export type UseAccountProfileResult = AsyncDataState<AccountProfile>;
@@ -10,6 +10,16 @@ export function useAccountProfile(accountId?: string): UseAccountProfileResult {
   const [data, setData] = useState<AccountProfile | null>(null);
   const [loading, setLoading] = useState(Boolean(accountId));
   const [error, setError] = useState<string | null>(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  const refetch = useCallback(() => {
+    if (!accountId) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setRefetchTrigger((current) => current + 1);
+  }, [accountId]);
 
   useEffect(() => {
     if (!accountId) {
@@ -46,9 +56,9 @@ export function useAccountProfile(accountId?: string): UseAccountProfileResult {
     return () => {
       cancelled = true;
     };
-  }, [accountId]);
+  }, [accountId, refetchTrigger]);
 
-  return { data, loading, error };
+  return { data, loading, error, refetch };
 }
 
 export function useLoyaltyPoints(userId?: string, initialPoints?: number): UseLoyaltyPointsResult {
@@ -56,6 +66,16 @@ export function useLoyaltyPoints(userId?: string, initialPoints?: number): UseLo
   const [points, setPoints] = useState<number | null>(initialPoints ?? null);
   const [loading, setLoading] = useState(Boolean(userId));
   const [error, setError] = useState<string | null>(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  const refetch = useCallback(() => {
+    if (!userId) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setRefetchTrigger((current) => current + 1);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) {
@@ -98,7 +118,7 @@ export function useLoyaltyPoints(userId?: string, initialPoints?: number): UseLo
     return () => {
       cancelled = true;
     };
-  }, [initialPoints, userId]);
+  }, [initialPoints, refetchTrigger, userId]);
 
-  return { data, points, loading, error };
+  return { data, points, loading, error, refetch };
 }

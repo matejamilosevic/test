@@ -1,4 +1,5 @@
 import { useAccountProfile, useLoyaltyPoints, type UseAccountProfileResult, type UseLoyaltyPointsResult } from "../hooks/useAccount";
+import { isProfileRetryUxEnabled } from "../lib/profile_config";
 
 export interface UserProfileBannerProps {
   accountId?: string;
@@ -20,13 +21,26 @@ export interface LoyaltyStripViewProps extends LoyaltyStripProps {
 }
 
 export function UserProfileBannerView({ title, profile }: UserProfileBannerViewProps) {
-  const { data, loading, error } = profile;
+  const { data, loading, error, refetch } = profile;
+  const retryEnabled = isProfileRetryUxEnabled();
 
   return (
     <section>
       <header>{title}</header>
       {loading ? <p>Loading...</p> : null}
-      {error ? <p>Unable to load profile</p> : null}
+      {error ? (
+        <p>
+          Unable to load profile
+          {retryEnabled && refetch ? (
+            <>
+              {" "}
+              <button type="button" onClick={() => refetch()}>
+                Try again
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
       {!loading && !error && data?.name ? <p>{data.name}</p> : null}
       {!loading && !error ? <pre>{JSON.stringify(data, null, 2)}</pre> : null}
     </section>
@@ -34,13 +48,26 @@ export function UserProfileBannerView({ title, profile }: UserProfileBannerViewP
 }
 
 export function LoyaltyStripView({ label, loyalty }: LoyaltyStripViewProps) {
-  const { points, loading, error } = loyalty;
+  const { points, loading, error, refetch } = loyalty;
+  const retryEnabled = isProfileRetryUxEnabled();
 
   return (
     <aside>
       <span>{label}</span>
       {loading ? <em>Loading...</em> : null}
-      {error ? <em>Unable to load loyalty points</em> : null}
+      {error ? (
+        <em>
+          Unable to load loyalty points
+          {retryEnabled && refetch ? (
+            <>
+              {" "}
+              <button type="button" onClick={() => refetch()}>
+                Try again
+              </button>
+            </>
+          ) : null}
+        </em>
+      ) : null}
       {!loading && !error ? <strong>{String(points ?? "")}</strong> : null}
     </aside>
   );
