@@ -10,6 +10,20 @@ import {
 } from "../services/reservation_ledger";
 import { ingestCheckoutCommerceFacts } from "../services/merchandising_checkout_ingest";
 import { resolveRiskGateForSubmit } from "./risk_routes";
+import {
+  CHECKOUT_INTERNAL_ERROR_BODY,
+  isCommitFailure,
+  isReserveFailure,
+  isRiskGateFailure,
+} from "./checkout_unions";
+
+let resolveRiskGateForSubmitImpl: typeof resolveRiskGateForSubmit = resolveRiskGateForSubmit;
+
+export function setResolveRiskGateForSubmitForTests(
+  impl: typeof resolveRiskGateForSubmit = resolveRiskGateForSubmit,
+): void {
+  resolveRiskGateForSubmitImpl = impl;
+}
 
 const cartLineSchema = z.object({
   sku: z.string().min(1),
@@ -124,7 +138,7 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
     }
   }
 
-  const riskGate = resolveRiskGateForSubmit({
+  const riskGate = resolveRiskGateForSubmitImpl({
     cartId: body.cart_id,
     quoteVersion: body.quote_version,
     organizationId: body.organization_id,
@@ -132,6 +146,10 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
     challengeToken: body.challenge_token,
   });
   if (riskGate.ok === false) {
+    if (!isRiskGateFailure(riskGate)) {
+      sendJson(res, 500, CHECKOUT_INTERNAL_ERROR_BODY);
+      return;
+    }
     sendJson(res, riskGate.status, riskGate.body);
     return;
   }
@@ -147,6 +165,10 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
   });
 
   if (commit.ok === false) {
+    if (!isCommitFailure(commit)) {
+      sendJson(res, 500, CHECKOUT_INTERNAL_ERROR_BODY);
+      return;
+    }
     sendJson(res, 409, {
       error: commit.code === "NO_ACTIVE_HOLD" ? "No active reservation for cart" : "Insufficient stock at commit",
       code: commit.code,
@@ -230,6 +252,10 @@ export async function handle_checkout_preflight(req: IncomingMessage, res: Serve
       correlationId,
     });
     if (reserved.ok === false) {
+      if (!isReserveFailure(reserved)) {
+        sendJson(res, 500, CHECKOUT_INTERNAL_ERROR_BODY);
+        return;
+      }
       sendJson(res, 409, {
         error: "Not enough inventory to reserve",
         code: reserved.code,
