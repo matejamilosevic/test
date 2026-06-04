@@ -1,13 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { computeMerchandisingRollup } from "../services/merchandising_facts_store";
-import { parseMerchandisingAsOf } from "../lib/merchandising_time";
+import { resolveAsOfIso } from "../lib/merchandising_resolve_as_of";
 import {
   merchandisingRollupToCsvHeader,
   merchandisingRollupToCsvRow,
   merchandisingRollupToExportRecord,
 } from "../lib/merchandising_export";
 import { MERCHANDISING_EXPORT_VERSION } from "../lib/merchandising_types";
+
+export { resolveAsOfIso };
 
 const rollupQuerySchema = z.object({
   as_of: z.string().optional(),
@@ -26,17 +28,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-function resolveAsOfIso(raw: string | undefined): { ok: true; asOfIso: string } | { ok: false; code: "INVALID_AS_OF" | "AS_OF_IN_FUTURE" } {
-  if (!raw) {
-    return { ok: true, asOfIso: new Date().toISOString() };
-  }
-  const parsed = parseMerchandisingAsOf(raw);
-  if (!parsed.ok) {
-    return parsed;
-  }
-  return { ok: true, asOfIso: parsed.instant.toISOString() };
-}
-
 export async function handle_merchandising_rollup(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://local.invalid");
   const query = Object.fromEntries(url.searchParams.entries());
@@ -51,7 +42,7 @@ export async function handle_merchandising_rollup(req: IncomingMessage, res: Ser
   }
 
   const asOf = resolveAsOfIso(parsed.data.as_of);
-  if (!asOf.ok) {
+  if (asOf.ok === false) {
     sendJson(res, 400, { error: "Invalid as_of parameter", code: asOf.code });
     return;
   }
@@ -81,7 +72,7 @@ export async function handle_merchandising_export(req: IncomingMessage, res: Ser
   }
 
   const asOf = resolveAsOfIso(parsed.data.as_of);
-  if (!asOf.ok) {
+  if (asOf.ok === false) {
     sendJson(res, 400, { error: "Invalid as_of parameter", code: asOf.code });
     return;
   }
