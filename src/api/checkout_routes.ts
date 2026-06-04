@@ -131,7 +131,7 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
     overrideToken: body.override_token,
     challengeToken: body.challenge_token,
   });
-  if (!riskGate.ok) {
+  if (riskGate.ok === false) {
     sendJson(res, riskGate.status, riskGate.body);
     return;
   }
@@ -146,7 +146,7 @@ export async function handle_checkout_submit(req: IncomingMessage, res: ServerRe
     correlationId,
   });
 
-  if (!commit.ok) {
+  if (commit.ok === false) {
     sendJson(res, 409, {
       error: commit.code === "NO_ACTIVE_HOLD" ? "No active reservation for cart" : "Insufficient stock at commit",
       code: commit.code,
@@ -226,10 +226,10 @@ export async function handle_checkout_preflight(req: IncomingMessage, res: Serve
   if (body.lines && body.lines.length > 0 && body.cart_id) {
     const reserved = reserveCartHold({
       cartId: body.cart_id,
-      lines: body.lines,
+      lines: body.lines.map((line) => ({ sku: line.sku, qty: line.qty })),
       correlationId,
     });
-    if (!reserved.ok) {
+    if (reserved.ok === false) {
       sendJson(res, 409, {
         error: "Not enough inventory to reserve",
         code: reserved.code,

@@ -31,8 +31,8 @@ function resolveAsOfIso(raw: string | undefined): { ok: true; asOfIso: string } 
     return { ok: true, asOfIso: new Date().toISOString() };
   }
   const parsed = parseMerchandisingAsOf(raw);
-  if (!parsed.ok) {
-    return parsed;
+  if (parsed.ok === false) {
+    return { ok: false, code: parsed.code };
   }
   return { ok: true, asOfIso: parsed.instant.toISOString() };
 }
@@ -51,7 +51,7 @@ export async function handle_merchandising_rollup(req: IncomingMessage, res: Ser
   }
 
   const asOf = resolveAsOfIso(parsed.data.as_of);
-  if (!asOf.ok) {
+  if (asOf.ok === false) {
     sendJson(res, 400, { error: "Invalid as_of parameter", code: asOf.code });
     return;
   }
@@ -81,7 +81,7 @@ export async function handle_merchandising_export(req: IncomingMessage, res: Ser
   }
 
   const asOf = resolveAsOfIso(parsed.data.as_of);
-  if (!asOf.ok) {
+  if (asOf.ok === false) {
     sendJson(res, 400, { error: "Invalid as_of parameter", code: asOf.code });
     return;
   }
