@@ -1,11 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert";
+import { createRoot } from "react-dom/client";
+import { act } from "react-dom/test-utils";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   LoyaltyStripView,
   UserProfileBanner,
   UserProfileBannerView,
 } from "../ProfileBanner";
+import {
+  resetProfileConfigForTests,
+  setProfileConfigForTests,
+} from "../../lib/profile_config";
+import { setupDom, teardownDom } from "../../test/dom";
 
 test("ProfileBanner exports use camelCase names", () => {
   assert.equal(typeof UserProfileBanner, "function");
@@ -89,4 +96,156 @@ test("LoyaltyStripView renders points from loyalty state", () => {
 
   assert.match(html, /120/);
   assert.match(html, /Points/);
+});
+
+test("UserProfileBannerView shows Try again button when retry UX is enabled", () => {
+  setProfileConfigForTests({ profileRetryUxEnabled: true });
+
+  try {
+    const html = renderToStaticMarkup(
+      <UserProfileBannerView
+        title="Profile"
+        profile={{
+          data: null,
+          loading: false,
+          error: "Unable to load profile",
+          refetch: () => {},
+        }}
+      />,
+    );
+
+    assert.match(html, /Try again/);
+  } finally {
+    resetProfileConfigForTests();
+  }
+});
+
+test("UserProfileBannerView hides Try again button when retry UX is disabled", () => {
+  setProfileConfigForTests({ profileRetryUxEnabled: false });
+
+  try {
+    const html = renderToStaticMarkup(
+      <UserProfileBannerView
+        title="Profile"
+        profile={{
+          data: null,
+          loading: false,
+          error: "Unable to load profile",
+          refetch: () => {},
+        }}
+      />,
+    );
+
+    assert.match(html, /Unable to load profile/);
+    assert.doesNotMatch(html, /Try again/);
+  } finally {
+    resetProfileConfigForTests();
+  }
+});
+
+test("LoyaltyStripView shows Try again button when retry UX is enabled", () => {
+  setProfileConfigForTests({ profileRetryUxEnabled: true });
+
+  try {
+    const html = renderToStaticMarkup(
+      <LoyaltyStripView
+        label="Points"
+        loyalty={{
+          data: null,
+          points: null,
+          loading: false,
+          error: "Unable to load loyalty points",
+          refetch: () => {},
+        }}
+      />,
+    );
+
+    assert.match(html, /Try again/);
+    assert.doesNotMatch(html, /<em>[\s\S]*Try again/);
+    assert.match(html, /<p>[\s\S]*Try again[\s\S]*<\/p>/);
+  } finally {
+    resetProfileConfigForTests();
+  }
+});
+
+test("UserProfileBannerView Try again click calls refetch once", async () => {
+  setProfileConfigForTests({ profileRetryUxEnabled: true });
+  let refetchCalls = 0;
+  const refetch = () => {
+    refetchCalls += 1;
+  };
+
+  const container = setupDom();
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <UserProfileBannerView
+          title="Profile"
+          profile={{
+            data: null,
+            loading: false,
+            error: "Unable to load profile",
+            refetch,
+          }}
+        />,
+      );
+    });
+
+    const button = container.querySelector("button");
+    assert.ok(button);
+    assert.match(button?.textContent ?? "", /Try again/);
+
+    await act(async () => {
+      button!.click();
+    });
+
+    assert.equal(refetchCalls, 1);
+  } finally {
+    root.unmount();
+    teardownDom();
+    resetProfileConfigForTests();
+  }
+});
+
+test("LoyaltyStripView Try again click calls refetch once", async () => {
+  setProfileConfigForTests({ profileRetryUxEnabled: true });
+  let refetchCalls = 0;
+  const refetch = () => {
+    refetchCalls += 1;
+  };
+
+  const container = setupDom();
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <LoyaltyStripView
+          label="Points"
+          loyalty={{
+            data: null,
+            points: null,
+            loading: false,
+            error: "Unable to load loyalty points",
+            refetch,
+          }}
+        />,
+      );
+    });
+
+    const button = container.querySelector("button");
+    assert.ok(button);
+
+    await act(async () => {
+      button!.click();
+    });
+
+    assert.equal(refetchCalls, 1);
+  } finally {
+    root.unmount();
+    teardownDom();
+    resetProfileConfigForTests();
+  }
 });
