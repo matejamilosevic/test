@@ -18,8 +18,16 @@ export {
   reserveCartHold,
   commitCartHold,
   releaseCartHold,
+  releaseHoldById,
+  getHoldMetadata,
+  sweepExpiredHolds,
 } from "./services/reservation_ledger";
-export { handle_checkout_submit, handle_checkout_preflight, handle_coupon_apply } from "./api/checkout_routes";
+export {
+  handle_checkout_submit,
+  handle_checkout_preflight,
+  handle_coupon_apply,
+  handle_checkout_release,
+} from "./api/checkout_routes";
 export { handle_merchandising_rollup, handle_merchandising_export } from "./api/reporting_routes";
 export {
   resetMerchandisingFactsForTests,
@@ -41,6 +49,23 @@ export type {
   MerchandisingFactEventType,
   MerchandisingTaxBucket,
 } from "./lib/merchandising_types";
+export {
+  buildCheckoutQuote,
+  checkoutQuoteSchema,
+  preflightRequestSchema,
+  couponApplyRequestSchema,
+} from "./services/checkout_quote_service";
+export {
+  getCheckoutMetrics,
+  resetCheckoutMetricsForTests,
+} from "./services/checkout_metrics";
+export {
+  getCheckoutConfig,
+  setCheckoutConfigForTests,
+  resetCheckoutConfigForTests,
+  isCommercialPipelineEnabled,
+} from "./lib/checkout_config";
+export { CHECKOUT_FEATURE_GATES, CHECKOUT_ERROR_CODES } from "./lib/checkout_constants";
 export {
   handle_checkout_risk_eval,
   handle_risk_review_cases_list,

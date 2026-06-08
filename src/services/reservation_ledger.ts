@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { getHoldTtlSeconds, isHoldTtlEnabled } from "../lib/checkout_config";
+import { incrementHoldExpiredTotal } from "./checkout_metrics";
 
 export type ReservationReason = "cart_hold" | "committed" | "released";
 
@@ -18,8 +20,18 @@ export interface CartLine {
   qty: number;
 }
 
+export interface HoldMetadata {
+  holdId: string;
+  organizationId: string;
+  quoteVersion: string;
+  correlationId: string;
+  expiresAt: string | null;
+  promoCodes: string[];
+}
+
 interface MutableCartHold {
   lines: Map<string, number>;
+  metadata?: HoldMetadata;
 }
 
 function isoNow(): string {
@@ -39,12 +51,16 @@ let reservationLedgerState: {
   events: ReservationLedgerEvent[];
   onHand: Map<string, number>;
   cartHolds: Map<string, MutableCartHold>;
+  holdIndex: Map<string, string>;
   idempotency: Map<string, string>;
+  couponIdempotency: Map<string, string>;
 } = {
   events: [],
   onHand: new Map(),
   cartHolds: new Map(),
+  holdIndex: new Map(),
   idempotency: new Map(),
+  couponIdempotency: new Map(),
 };
 
 export function resetReservationLedgerForTests(): void {
@@ -52,7 +68,9 @@ export function resetReservationLedgerForTests(): void {
     events: [],
     onHand: new Map(),
     cartHolds: new Map(),
+    holdIndex: new Map(),
     idempotency: new Map(),
+    couponIdempotency: new Map(),
   };
 }
 
@@ -88,14 +106,39 @@ export function getAvailableToPromise(skuId: string): number {
   return onHand - globalReservedForSku(skuId);
 }
 
+export function getHoldMetadata(cartId: string): HoldMetadata | undefined {
+  return reservationLedgerState.cartHolds.get(cartId)?.metadata;
+}
+
+export function getHoldMetadataByHoldId(holdId: string): (HoldMetadata & { cartId: string }) | undefined {
+  const cartId = reservationLedgerState.holdIndex.get(holdId);
+  if (!cartId) {
+    return undefined;
+  }
+  const meta = reservationLedgerState.cartHolds.get(cartId)?.metadata;
+  if (!meta) {
+    return undefined;
+  }
+  return { ...meta, cartId };
+}
+
+export function hasActiveCartHold(cartId: string): boolean {
+  const hold = reservationLedgerState.cartHolds.get(cartId);
+  return Boolean(hold && hold.lines.size > 0);
+}
+
 export type ReserveCartHoldResult =
-  | { ok: true; correlationId: string }
+  | { ok: true; correlationId: string; holdId: string; expiresAt: string | null }
   | { ok: false; code: "INSUFFICIENT_STOCK"; skuId: string };
 
 export function reserveCartHold(input: {
   cartId: string;
   lines: CartLine[];
   correlationId: string;
+  organizationId?: string;
+  quoteVersion?: string;
+  promoCodes?: string[];
+  holdId?: string;
 }): ReserveCartHoldResult {
   const { cartId, lines, correlationId } = input;
   const normalized = lines.map((l) => ({ sku: String(l.sku), qty: Number(l.qty) }));
@@ -139,20 +182,174 @@ export function reserveCartHold(input: {
     }
   }
 
-  if (nextMap.size === 0) {
-    reservationLedgerState.cartHolds.delete(cartId);
-  } else {
-    reservationLedgerState.cartHolds.set(cartId, { lines: nextMap });
+  const holdId = input.holdId ?? oldHold?.metadata?.holdId ?? `hold-${randomUUID()}`;
+  const ttlEnabled = isHoldTtlEnabled();
+  const expiresAt = ttlEnabled
+    ? new Date(Date.now() + getHoldTtlSeconds() * 1000).toISOString()
+    : null;
+
+  if (oldHold?.metadata?.holdId && oldHold.metadata.holdId !== holdId) {
+    reservationLedgerState.holdIndex.delete(oldHold.metadata.holdId);
   }
 
-  return { ok: true, correlationId };
+  if (nextMap.size === 0) {
+    if (oldHold?.metadata?.holdId) {
+      reservationLedgerState.holdIndex.delete(oldHold.metadata.holdId);
+    }
+    reservationLedgerState.cartHolds.delete(cartId);
+  } else {
+    const metadata: HoldMetadata = {
+      holdId,
+      organizationId: input.organizationId ?? oldHold?.metadata?.organizationId ?? "default",
+      quoteVersion: input.quoteVersion ?? oldHold?.metadata?.quoteVersion ?? "",
+      correlationId,
+      expiresAt,
+      promoCodes: input.promoCodes ?? oldHold?.metadata?.promoCodes ?? [],
+    };
+    reservationLedgerState.cartHolds.set(cartId, { lines: nextMap, metadata });
+    reservationLedgerState.holdIndex.set(holdId, cartId);
+  }
+
+  return { ok: true, correlationId, holdId, expiresAt };
+}
+
+export function updateHoldQuoteMetadata(input: {
+  cartId: string;
+  quoteVersion: string;
+  correlationId: string;
+  promoCodes?: string[];
+}): void {
+  const hold = reservationLedgerState.cartHolds.get(input.cartId);
+  if (!hold?.metadata) {
+    return;
+  }
+  hold.metadata.quoteVersion = input.quoteVersion;
+  hold.metadata.correlationId = input.correlationId;
+  if (input.promoCodes) {
+    hold.metadata.promoCodes = input.promoCodes;
+  }
+  if (isHoldTtlEnabled()) {
+    hold.metadata.expiresAt = new Date(Date.now() + getHoldTtlSeconds() * 1000).toISOString();
+  }
+}
+
+function releaseHoldLines(cartId: string, correlationId: string): void {
+  const hold = reservationLedgerState.cartHolds.get(cartId);
+  if (!hold || hold.lines.size === 0) {
+    return;
+  }
+
+  for (const [sku, qty] of hold.lines) {
+    appendEvent({
+      skuId: sku,
+      locationId: "default",
+      deltaReserved: -qty,
+      deltaOnHand: 0,
+      reason: "released",
+      reference: cartId,
+      correlationId,
+    });
+  }
+  if (hold.metadata?.holdId) {
+    reservationLedgerState.holdIndex.delete(hold.metadata.holdId);
+  }
+  reservationLedgerState.cartHolds.delete(cartId);
+}
+
+export function releaseCartHold(input: { cartId: string; correlationId: string }): void {
+  releaseHoldLines(input.cartId, input.correlationId);
+}
+
+export type ReleaseHoldByIdResult =
+  | { ok: true }
+  | { ok: false; code: "HOLD_NOT_FOUND" | "FORBIDDEN" };
+
+export function releaseHoldById(input: {
+  holdId: string;
+  organizationId: string;
+  correlationId: string;
+}): ReleaseHoldByIdResult {
+  const located = getHoldMetadataByHoldId(input.holdId);
+  if (!located) {
+    return { ok: false, code: "HOLD_NOT_FOUND" };
+  }
+  if (located.organizationId !== input.organizationId) {
+    return { ok: false, code: "FORBIDDEN" };
+  }
+  releaseHoldLines(located.cartId, input.correlationId);
+  return { ok: true };
+}
+
+function isHoldExpired(metadata: HoldMetadata | undefined): boolean {
+  if (!metadata?.expiresAt) {
+    return false;
+  }
+  return Date.parse(metadata.expiresAt) <= Date.now();
+}
+
+export type ValidateSubmitQuoteResult =
+  | { ok: true }
+  | { ok: false; code: "QUOTE_STALE" | "HOLD_EXPIRED" | "NO_ACTIVE_HOLD" };
+
+export function validateSubmitQuote(input: {
+  cartId: string;
+  quoteVersion?: string;
+  correlationId: string;
+  enforceVersion?: boolean;
+}): ValidateSubmitQuoteResult {
+  const hold = reservationLedgerState.cartHolds.get(input.cartId);
+  if (!hold || hold.lines.size === 0) {
+    return { ok: false, code: "NO_ACTIVE_HOLD" };
+  }
+
+  if (isHoldExpired(hold.metadata)) {
+    releaseHoldLines(input.cartId, input.correlationId);
+    incrementHoldExpiredTotal();
+    return { ok: false, code: "HOLD_EXPIRED" };
+  }
+
+  if (input.enforceVersion && input.quoteVersion && hold.metadata?.quoteVersion) {
+    if (input.quoteVersion !== hold.metadata.quoteVersion) {
+      return { ok: false, code: "QUOTE_STALE" };
+    }
+  }
+
+  return { ok: true };
+}
+
+export function sweepExpiredHolds(correlationId: string): number {
+  let count = 0;
+  for (const [cartId, hold] of [...reservationLedgerState.cartHolds.entries()]) {
+    if (isHoldExpired(hold.metadata)) {
+      releaseHoldLines(cartId, correlationId);
+      incrementHoldExpiredTotal();
+      count += 1;
+    }
+  }
+  return count;
 }
 
 export type CommitCartHoldResult =
   | { ok: true; correlationId: string; orderRef: string }
-  | { ok: false; code: "NO_ACTIVE_HOLD" | "INSUFFICIENT_STOCK"; skuId?: string };
+  | { ok: false; code: "NO_ACTIVE_HOLD" | "INSUFFICIENT_STOCK" | "QUOTE_STALE" | "HOLD_EXPIRED"; skuId?: string };
 
-export function commitCartHold(input: { cartId: string; orderRef: string; correlationId: string }): CommitCartHoldResult {
+export function commitCartHold(input: {
+  cartId: string;
+  orderRef: string;
+  correlationId: string;
+  quoteVersion?: string;
+  enforceVersion?: boolean;
+}): CommitCartHoldResult {
+  const validation = validateSubmitQuote({
+    cartId: input.cartId,
+    quoteVersion: input.quoteVersion,
+    correlationId: input.correlationId,
+    enforceVersion: input.enforceVersion,
+  });
+  if (!validation.ok) {
+    return { ok: false, code: validation.code };
+  }
+
   const hold = reservationLedgerState.cartHolds.get(input.cartId);
   if (!hold || hold.lines.size === 0) {
     return { ok: false, code: "NO_ACTIVE_HOLD" };
@@ -179,28 +376,11 @@ export function commitCartHold(input: { cartId: string; orderRef: string; correl
     reservationLedgerState.onHand.set(sku, nextOnHand);
   }
 
+  if (hold.metadata?.holdId) {
+    reservationLedgerState.holdIndex.delete(hold.metadata.holdId);
+  }
   reservationLedgerState.cartHolds.delete(input.cartId);
   return { ok: true, correlationId: input.correlationId, orderRef: input.orderRef };
-}
-
-export function releaseCartHold(input: { cartId: string; correlationId: string }): void {
-  const hold = reservationLedgerState.cartHolds.get(input.cartId);
-  if (!hold || hold.lines.size === 0) {
-    return;
-  }
-
-  for (const [sku, qty] of hold.lines) {
-    appendEvent({
-      skuId: sku,
-      locationId: "default",
-      deltaReserved: -qty,
-      deltaOnHand: 0,
-      reason: "released",
-      reference: input.cartId,
-      correlationId: input.correlationId,
-    });
-  }
-  reservationLedgerState.cartHolds.delete(input.cartId);
 }
 
 export function rememberIdempotentResponse(key: string, responseJson: string): void {
@@ -209,6 +389,14 @@ export function rememberIdempotentResponse(key: string, responseJson: string): v
 
 export function getIdempotentResponse(key: string): string | undefined {
   return reservationLedgerState.idempotency.get(key);
+}
+
+export function rememberCouponIdempotentResponse(key: string, responseJson: string): void {
+  reservationLedgerState.couponIdempotency.set(key, responseJson);
+}
+
+export function getCouponIdempotentResponse(key: string): string | undefined {
+  return reservationLedgerState.couponIdempotency.get(key);
 }
 
 export function newCorrelationId(): string {

@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/services/reservation_ledger.test.ts src/services/risk_engine.test.ts src/api/checkout_routes.test.ts src/api/risk_routes.test.ts src/lib/merchandising_golden.test.ts src/api/reporting_routes.test.ts src/hooks/useAccount.test.tsx src/components/__tests__/ProfileBanner.test.tsx"
+    "test": "tsx --test src/services/reservation_ledger.test.ts src/services/checkout_quote_service.test.ts src/services/risk_engine.test.ts src/api/checkout_routes.test.ts src/api/checkout_commercial.test.ts src/api/risk_routes.test.ts src/lib/merchandising_golden.test.ts src/api/reporting_routes.test.ts src/hooks/useAccount.test.tsx src/components/__tests__/ProfileBanner.test.tsx"
   },
   "dependencies": {
     "react": "^18.3.1",

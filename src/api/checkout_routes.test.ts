@@ -3,10 +3,13 @@ import assert from "node:assert";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handle_checkout_preflight, handle_checkout_submit } from "./checkout_routes";
+import { resetCheckoutConfigForTests } from "../lib/checkout_config";
 import { resetReservationLedgerForTests, seedOnHandSku } from "../services/reservation_ledger";
 import { resetMerchandisingFactsForTests, computeMerchandisingRollup } from "../services/merchandising_facts_store";
 
-function mockInboundJson(body: unknown): IncomingMessage {
+const AUTH = { authorization: "Bearer org-acme-01:alice@acme.com" };
+
+function mockInboundJson(body: unknown, headers: Record<string, string> = AUTH): IncomingMessage {
   const buf = Buffer.from(JSON.stringify(body), "utf8");
   const r = new Readable({
     read() {
@@ -15,6 +18,7 @@ function mockInboundJson(body: unknown): IncomingMessage {
     },
   }) as IncomingMessage;
   r.url = "/";
+  r.headers = headers;
   return r;
 }
 
@@ -39,6 +43,7 @@ function captureResponse(): { res: ServerResponse; finished: Promise<{ status: n
 afterEach(() => {
   resetReservationLedgerForTests();
   resetMerchandisingFactsForTests();
+  resetCheckoutConfigForTests();
 });
 
 test("preflight with lines reserves stock; submit commits", async () => {
@@ -56,10 +61,12 @@ test("preflight with lines reserves stock; submit commits", async () => {
   assert.strictEqual(out1.status, 200);
 
   const { res: r2, finished: f2 } = captureResponse();
+  const preBody = JSON.parse(out1.body) as { quote_version: string };
   await handle_checkout_submit(
     mockInboundJson({
       cart_id: "cart-x",
       payment_method: "card",
+      quote_version: preBody.quote_version,
     }),
     r2,
   );
@@ -137,11 +144,14 @@ test("idempotency key returns cached submit body", async () => {
 
   const key = "idem-1";
   const { res: ra, finished: fa } = captureResponse();
+  const preQuote = JSON.parse((await pre.finished).body) as { quote_version: string };
+
   await handle_checkout_submit(
     mockInboundJson({
       cart_id: "cart-z",
       payment_method: "card",
       idempotency_key: key,
+      quote_version: preQuote.quote_version,
     }),
     ra,
   );
@@ -153,6 +163,7 @@ test("idempotency key returns cached submit body", async () => {
       cart_id: "cart-z",
       payment_method: "card",
       idempotency_key: key,
+      quote_version: preQuote.quote_version,
     }),
     rb,
   );
