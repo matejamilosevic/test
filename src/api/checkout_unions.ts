@@ -17,7 +17,13 @@ export function isRiskGateFailure(
 export function isCommitFailure(
   result: CommitCartHoldResult,
 ): result is Extract<CommitCartHoldResult, { ok: false }> {
-  return result.ok === false && (result.code === "NO_ACTIVE_HOLD" || result.code === "INSUFFICIENT_STOCK");
+  return (
+    result.ok === false &&
+    (result.code === "NO_ACTIVE_HOLD" ||
+      result.code === "INSUFFICIENT_STOCK" ||
+      result.code === "QUOTE_STALE" ||
+      result.code === "HOLD_EXPIRED")
+  );
 }
 
 export function isReserveFailure(

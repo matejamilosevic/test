@@ -8,6 +8,7 @@ import {
   handle_risk_review_case_get,
   handle_risk_review_case_override,
 } from "./risk_routes";
+import { resetCheckoutConfigForTests } from "../lib/checkout_config";
 import { resetRiskConfigForTests, setRiskConfigForTests } from "../lib/risk_config";
 import { resetReservationLedgerForTests, seedOnHandSku } from "../services/reservation_ledger";
 import {
@@ -18,6 +19,8 @@ import {
   resetRiskStoreForTests,
 } from "../services/risk_store";
 import { evaluateCheckoutRisk } from "../services/risk_engine";
+
+const AUTH = { authorization: "Bearer org-acme-01:alice@acme.com" };
 
 function mockInboundJson(body: unknown, headers: Record<string, string> = {}): IncomingMessage {
   const buf = Buffer.from(JSON.stringify(body), "utf8");
@@ -50,19 +53,23 @@ function captureResponse(): { res: ServerResponse; finished: Promise<{ status: n
   return { res, finished };
 }
 
-async function seedCartHold(cartId: string, sku = "SKU-R"): Promise<void> {
+async function seedCartHold(cartId: string, sku = "SKU-R"): Promise<number> {
   seedOnHandSku(sku, 2);
   const { handle_checkout_preflight } = await import("./checkout_routes");
   const { res, finished } = captureResponse();
   await handle_checkout_preflight(
-    mockInboundJson({
-      subtotal: 10,
-      cart_id: cartId,
-      lines: [{ sku, qty: 1 }],
-    }),
+    mockInboundJson(
+      {
+        subtotal: 10,
+        cart_id: cartId,
+        lines: [{ sku, qty: 1 }],
+      },
+      AUTH,
+    ),
     res,
   );
-  await finished;
+  const out = await finished;
+  return (JSON.parse(out.body) as { quote_version: number }).quote_version;
 }
 
 async function runRiskEval(body: Record<string, unknown>): Promise<{ status: number; body: string }> {
@@ -75,6 +82,7 @@ afterEach(() => {
   resetReservationLedgerForTests();
   resetRiskStoreForTests();
   resetRiskConfigForTests();
+  resetCheckoutConfigForTests();
 });
 
 test("risk eval requires authentication", async () => {
@@ -93,14 +101,14 @@ test("risk eval requires authentication", async () => {
 
 test("submit blocked without prior evaluation when gate enabled", async () => {
   setRiskConfigForTests({ riskGateEnabled: true });
-  await seedCartHold("cart-happy-01");
+  const quoteVersion = await seedCartHold("cart-happy-01");
 
   const { res, finished } = captureResponse();
   await handle_checkout_submit(
     mockInboundJson({
       cart_id: "cart-happy-01",
       payment_method: "card",
-      quote_version: "quote-v1",
+      quote_version: quoteVersion,
       organization_id: "org-acme-01",
     }),
     res,
@@ -112,12 +120,12 @@ test("submit blocked without prior evaluation when gate enabled", async () => {
 
 test("blocked outcome prevents ledger commit", async () => {
   setRiskConfigForTests({ riskGateEnabled: true });
-  await seedCartHold("cart-high-risk-02");
+  const quoteVersion = await seedCartHold("cart-high-risk-02");
 
   await runRiskEval({
     organization_id: "org-acme-01",
     cart_id: "cart-high-risk-02",
-    quote_version: "quote-v1",
+    quote_version: String(quoteVersion),
     session_metadata: { velocity: 10 },
   });
 
@@ -126,7 +134,7 @@ test("blocked outcome prevents ledger commit", async () => {
     mockInboundJson({
       cart_id: "cart-high-risk-02",
       payment_method: "card",
-      quote_version: "quote-v1",
+      quote_version: quoteVersion,
       organization_id: "org-acme-01",
     }),
     res,
@@ -138,12 +146,12 @@ test("blocked outcome prevents ledger commit", async () => {
 
 test("review outcome creates case and returns 202", async () => {
   setRiskConfigForTests({ riskGateEnabled: true });
-  await seedCartHold("cart-review-03");
+  const quoteVersion = await seedCartHold("cart-review-03");
 
   await runRiskEval({
     organization_id: "org-acme-01",
     cart_id: "cart-review-03",
-    quote_version: "quote-v1",
+    quote_version: String(quoteVersion),
     session_metadata: { single_sku_pct: 0.95 },
   });
 
@@ -152,7 +160,7 @@ test("review outcome creates case and returns 202", async () => {
     mockInboundJson({
       cart_id: "cart-review-03",
       payment_method: "card",
-      quote_version: "quote-v1",
+      quote_version: quoteVersion,
       organization_id: "org-acme-01",
     }),
     res,
@@ -164,12 +172,12 @@ test("review outcome creates case and returns 202", async () => {
 
 test("shadow mode allows blocked orders", async () => {
   setRiskConfigForTests({ riskGateEnabled: true, riskShadowMode: true });
-  await seedCartHold("cart-high-risk-02");
+  const quoteVersion = await seedCartHold("cart-high-risk-02");
 
   await runRiskEval({
     organization_id: "org-acme-01",
     cart_id: "cart-high-risk-02",
-    quote_version: "quote-v1",
+    quote_version: String(quoteVersion),
     session_metadata: { velocity: 10 },
   });
 
@@ -178,7 +186,7 @@ test("shadow mode allows blocked orders", async () => {
     mockInboundJson({
       cart_id: "cart-high-risk-02",
       payment_method: "card",
-      quote_version: "quote-v1",
+      quote_version: quoteVersion,
       organization_id: "org-acme-01",
     }),
     res,
@@ -189,12 +197,12 @@ test("shadow mode allows blocked orders", async () => {
 
 test("support override allows checkout", async () => {
   setRiskConfigForTests({ riskGateEnabled: true });
-  await seedCartHold("cart-review-03");
+  const quoteVersion = await seedCartHold("cart-review-03");
 
   const evalOut = await runRiskEval({
     organization_id: "org-acme-01",
     cart_id: "cart-review-03",
-    quote_version: "quote-v1",
+    quote_version: String(quoteVersion),
     session_metadata: { single_sku_pct: 0.95 },
   });
   const evaluationId = JSON.parse(evalOut.body).evaluation_id as string;
@@ -221,7 +229,7 @@ test("support override allows checkout", async () => {
     mockInboundJson({
       cart_id: "cart-review-03",
       payment_method: "card",
-      quote_version: "quote-v1",
+      quote_version: quoteVersion,
       organization_id: "org-acme-01",
       override_token: overrideToken,
     }),
@@ -275,12 +283,12 @@ test("multi-tenant isolation for review cases", async () => {
 
 test("quote version mismatch forces re-evaluation", async () => {
   setRiskConfigForTests({ riskGateEnabled: true });
-  await seedCartHold("cart-happy-01");
+  const quoteVersion = await seedCartHold("cart-happy-01");
 
   await runRiskEval({
     organization_id: "org-acme-01",
     cart_id: "cart-happy-01",
-    quote_version: "quote-v1",
+    quote_version: String(quoteVersion),
     session_metadata: { velocity: 0 },
   });
 
@@ -289,7 +297,7 @@ test("quote version mismatch forces re-evaluation", async () => {
     mockInboundJson({
       cart_id: "cart-happy-01",
       payment_method: "card",
-      quote_version: "quote-v2",
+      quote_version: quoteVersion + 1,
       organization_id: "org-acme-01",
     }),
     res,
@@ -301,13 +309,14 @@ test("quote version mismatch forces re-evaluation", async () => {
 
 test("feature gate kill-switch preserves legacy submit", async () => {
   setRiskConfigForTests({ riskGateEnabled: false });
-  await seedCartHold("cart-z");
+  const quoteVersion = await seedCartHold("cart-z");
 
   const { res, finished } = captureResponse();
   await handle_checkout_submit(
     mockInboundJson({
       cart_id: "cart-z",
       payment_method: "card",
+      quote_version: quoteVersion,
     }),
     res,
   );
@@ -317,12 +326,12 @@ test("feature gate kill-switch preserves legacy submit", async () => {
 
 test("allow outcome proceeds to commit", async () => {
   setRiskConfigForTests({ riskGateEnabled: true });
-  await seedCartHold("cart-happy-01");
+  const quoteVersion = await seedCartHold("cart-happy-01");
 
   await runRiskEval({
     organization_id: "org-acme-01",
     cart_id: "cart-happy-01",
-    quote_version: "quote-v1",
+    quote_version: String(quoteVersion),
     session_metadata: { velocity: 0 },
   });
 
@@ -331,12 +340,12 @@ test("allow outcome proceeds to commit", async () => {
     mockInboundJson({
       cart_id: "cart-happy-01",
       payment_method: "card",
-      quote_version: "quote-v1",
+      quote_version: quoteVersion,
       organization_id: "org-acme-01",
     }),
     res,
   );
   const out = await finished;
   assert.strictEqual(out.status, 200);
-  assert.ok(getCachedEvaluation("cart-happy-01", "quote-v1"));
+  assert.ok(getCachedEvaluation("cart-happy-01", String(quoteVersion)));
 });

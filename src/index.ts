@@ -19,7 +19,17 @@ export {
   commitCartHold,
   releaseCartHold,
 } from "./services/reservation_ledger";
-export { handle_checkout_submit, handle_checkout_preflight, handle_coupon_apply } from "./api/checkout_routes";
+export {
+  handle_checkout_submit,
+  handle_checkout_preflight,
+  handle_coupon_apply,
+  handle_checkout_release,
+  parseAuthContext,
+} from "./api/checkout_routes";
+export { CHECKOUT_FEATURE_GATES, CHECKOUT_ERROR_CODES } from "./lib/checkout_constants";
+export { isCommercialPipelineEnabled, setCheckoutConfigForTests, resetCheckoutConfigForTests } from "./lib/checkout_config";
+export { buildCheckoutQuote, checkoutQuoteSchema } from "./services/checkout_quote_service";
+export { getCheckoutMetrics, resetCheckoutMetricsForTests } from "./services/checkout_metrics";
 export { handle_merchandising_rollup, handle_merchandising_export } from "./api/reporting_routes";
 export {
   resetMerchandisingFactsForTests,

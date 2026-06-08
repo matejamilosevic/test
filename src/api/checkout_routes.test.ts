@@ -9,8 +9,11 @@ import {
 } from "./checkout_routes";
 import { handle_checkout_risk_eval } from "./risk_routes";
 import { resolveRiskGateForSubmit } from "./risk_routes";
+import { resetCheckoutConfigForTests } from "../lib/checkout_config";
 import { resetReservationLedgerForTests, seedOnHandSku } from "../services/reservation_ledger";
 import { resetMerchandisingFactsForTests, computeMerchandisingRollup } from "../services/merchandising_facts_store";
+
+const AUTH = { authorization: "Bearer org-acme-01:alice@acme.com" };
 
 function mockInboundJson(body: unknown, headers: Record<string, string> = {}): IncomingMessage {
   const buf = Buffer.from(JSON.stringify(body), "utf8");
@@ -46,6 +49,7 @@ function captureResponse(): { res: ServerResponse; finished: Promise<{ status: n
 afterEach(() => {
   resetReservationLedgerForTests();
   resetMerchandisingFactsForTests();
+  resetCheckoutConfigForTests();
   setResolveRiskGateForSubmitForTests();
 });
 
@@ -70,11 +74,14 @@ test("successful submit returns 200 with queued status and snapshot shape", asyn
   seedOnHandSku("SKU-OK", 2);
   const pre = captureResponse();
   await handle_checkout_preflight(
-    mockInboundJson({
-      subtotal: 42,
-      cart_id: "cart-ok",
-      lines: [{ sku: "SKU-OK", qty: 1 }],
-    }),
+    mockInboundJson(
+      {
+        subtotal: 42,
+        cart_id: "cart-ok",
+        lines: [{ sku: "SKU-OK", qty: 1 }],
+      },
+      AUTH,
+    ),
     pre.res,
   );
   await pre.finished;
@@ -129,21 +136,26 @@ test("preflight with lines reserves stock; submit commits", async () => {
   seedOnHandSku("SKU-X", 2);
   const { res: r1, finished: f1 } = captureResponse();
   await handle_checkout_preflight(
-    mockInboundJson({
-      subtotal: 10,
-      cart_id: "cart-x",
-      lines: [{ sku: "SKU-X", qty: 1 }],
-    }),
+    mockInboundJson(
+      {
+        subtotal: 10,
+        cart_id: "cart-x",
+        lines: [{ sku: "SKU-X", qty: 1 }],
+      },
+      AUTH,
+    ),
     r1,
   );
   const out1 = await f1;
   assert.strictEqual(out1.status, 200);
+  const preBody = JSON.parse(out1.body) as { quote_version: number };
 
   const { res: r2, finished: f2 } = captureResponse();
   await handle_checkout_submit(
     mockInboundJson({
       cart_id: "cart-x",
       payment_method: "card",
+      quote_version: preBody.quote_version,
     }),
     r2,
   );
@@ -172,11 +184,14 @@ test("submit with commerce ingests merchandising facts after successful commit",
   seedOnHandSku("SKU-COM", 5);
   const pre = captureResponse();
   await handle_checkout_preflight(
-    mockInboundJson({
-      subtotal: 25,
-      cart_id: "cart-com",
-      lines: [{ sku: "SKU-COM", qty: 1 }],
-    }),
+    mockInboundJson(
+      {
+        subtotal: 25,
+        cart_id: "cart-com",
+        lines: [{ sku: "SKU-COM", qty: 1 }],
+      },
+      AUTH,
+    ),
     pre.res,
   );
   await pre.finished;
@@ -210,22 +225,27 @@ test("idempotency key returns cached submit body", async () => {
   seedOnHandSku("SKU-Z", 1);
   const pre = captureResponse();
   await handle_checkout_preflight(
-    mockInboundJson({
-      subtotal: 1,
-      cart_id: "cart-z",
-      lines: [{ sku: "SKU-Z", qty: 1 }],
-    }),
+    mockInboundJson(
+      {
+        subtotal: 1,
+        cart_id: "cart-z",
+        lines: [{ sku: "SKU-Z", qty: 1 }],
+      },
+      AUTH,
+    ),
     pre.res,
   );
   await pre.finished;
 
   const key = "idem-1";
+  const preQuote = JSON.parse((await pre.finished).body) as { quote_version: number };
   const { res: ra, finished: fa } = captureResponse();
   await handle_checkout_submit(
     mockInboundJson({
       cart_id: "cart-z",
       payment_method: "card",
       idempotency_key: key,
+      quote_version: preQuote.quote_version,
     }),
     ra,
   );
@@ -237,6 +257,7 @@ test("idempotency key returns cached submit body", async () => {
       cart_id: "cart-z",
       payment_method: "card",
       idempotency_key: key,
+      quote_version: preQuote.quote_version,
     }),
     rb,
   );
