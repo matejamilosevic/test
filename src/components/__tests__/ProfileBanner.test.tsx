@@ -143,6 +143,30 @@ test("UserProfileBannerView hides Try again button when retry UX is disabled", (
   }
 });
 
+test("LoyaltyStripView hides Try again button when retry UX is disabled", () => {
+  setProfileConfigForTests({ profileRetryUxEnabled: false });
+
+  try {
+    const html = renderToStaticMarkup(
+      <LoyaltyStripView
+        label="Points"
+        loyalty={{
+          data: null,
+          points: null,
+          loading: false,
+          error: "Unable to load loyalty points",
+          refetch: () => {},
+        }}
+      />,
+    );
+
+    assert.match(html, /Unable to load loyalty points/);
+    assert.doesNotMatch(html, /Try again/);
+  } finally {
+    resetProfileConfigForTests();
+  }
+});
+
 test("LoyaltyStripView shows Try again button when retry UX is enabled", () => {
   setProfileConfigForTests({ profileRetryUxEnabled: true });
 
