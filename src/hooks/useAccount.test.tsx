@@ -274,6 +274,137 @@ test("useAccountProfile ignores stale refetch when accountId changes", async () 
   }
 });
 
+test("useLoyaltyPoints refetch clears error and re-triggers fetch", async () => {
+  let fetchCount = 0;
+  const restore = mockFetch(async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return {
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      } as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "user-01", tier: "gold", points: 42 }),
+    } as Response;
+  });
+
+  const snapshots: UseLoyaltyPointsResult[] = [];
+
+  function Harness() {
+    const result = useLoyaltyPoints("user-01");
+    useEffect(() => {
+      snapshots.push({
+        data: result.data,
+        points: result.points,
+        loading: result.loading,
+        error: result.error,
+        refetch: result.refetch,
+      });
+    }, [result.data, result.error, result.loading, result.points, result.refetch]);
+    return null;
+  }
+
+  const container = setupDom();
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const failedSnapshot = snapshots.find(
+      (snapshot) => snapshot.error === "Unable to load loyalty points",
+    );
+    assert.ok(failedSnapshot);
+
+    await act(async () => {
+      failedSnapshot?.refetch?.();
+    });
+    await flushPromises();
+
+    const retryingSnapshot = snapshots.find(
+      (snapshot) => snapshot.loading && snapshot.error === null && snapshot !== failedSnapshot,
+    );
+    assert.ok(retryingSnapshot, "expected loading state with cleared error after refetch");
+
+    await flushPromises();
+    await flushPromises();
+
+    assert.ok(fetchCount >= 2);
+    assert.equal(latestSnapshot(snapshots)?.error, null);
+    assert.equal(latestSnapshot(snapshots)?.points, 42);
+  } finally {
+    root.unmount();
+    teardownDom();
+    restore();
+  }
+});
+
+test("useAccountProfile rapid refetch calls each trigger a fetch and last response wins", async () => {
+  let fetchCount = 0;
+  const restore = mockFetch(() => {
+    fetchCount += 1;
+    const count = fetchCount;
+    return new Promise<Response>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ id: "user-01", name: `Profile ${count}` }),
+        } as Response);
+      }, 10);
+    });
+  });
+
+  const latest = { current: null as UseAccountProfileResult | null };
+
+  function Harness() {
+    const result = useAccountProfile("user-01");
+    useEffect(() => {
+      latest.current = result;
+    }, [result]);
+    return null;
+  }
+
+  const container = setupDom();
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const refetch = latest.current?.refetch;
+    assert.ok(refetch);
+
+    for (let i = 0; i < 5; i += 1) {
+      await act(async () => {
+        refetch();
+      });
+    }
+
+    await flushPromises();
+    await flushPromises();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
+
+    assert.equal(fetchCount, 6);
+    assert.equal(latest.current?.data?.name, "Profile 6");
+  } finally {
+    root.unmount();
+    teardownDom();
+    restore();
+  }
+});
+
 test("useLoyaltyPoints ignores stale refetch when userId changes", async () => {
   let resolveFirst: ((value: Response) => void) | null = null;
   let fetchCount = 0;
